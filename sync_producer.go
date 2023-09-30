@@ -1,6 +1,9 @@
 package sarama
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // SyncProducer publishes Kafka messages, blocking until they have been acknowledged. It routes messages to the correct
 // broker, refreshing metadata as appropriate, and parses responses for errors. You must call Close() on a producer
@@ -18,6 +21,8 @@ type SyncProducer interface {
 	// succeeded or failed to produce. It will return the partition and the offset
 	// of the produced message, or an error if the message failed to produce.
 	SendMessage(msg *ProducerMessage) (partition int32, offset int64, err error)
+
+	SendMessageWithContext(msg *ProducerMessage, ctx context.Context) (partition int32, offset int64, err error)
 
 	// SendMessages produces a given set of messages, and returns only when all
 	// messages in the set have either succeeded or failed. Note that messages
@@ -110,6 +115,18 @@ func verifyProducerConfig(config *Config) error {
 }
 
 func (sp *syncProducer) SendMessage(msg *ProducerMessage) (partition int32, offset int64, err error) {
+	expectation := make(chan *ProducerError, 1)
+	msg.expectation = expectation
+	sp.producer.Input() <- msg
+
+	if pErr := <-expectation; pErr != nil {
+		return -1, -1, pErr.Err
+	}
+
+	return msg.Partition, msg.Offset, nil
+}
+
+func (sp *syncProducer) SendMessageWithContext(msg *ProducerMessage, ctx context.Context) (partition int32, offset int64, err error) {
 	expectation := make(chan *ProducerError, 1)
 	msg.expectation = expectation
 	sp.producer.Input() <- msg
